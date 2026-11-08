@@ -22,7 +22,6 @@ class WorkerController extends Controller
             'pincode' => ['required', 'digits:6'],
             'experience_years' => ['required', 'integer', 'min:0', 'max:60'],
             'service_radius_km' => ['required', 'integer', 'min:1', 'max:100'],
-
             'working_days' => ['required', 'array', 'min:1'],
             'working_days.*' => [
                 'required',
@@ -55,12 +54,84 @@ class WorkerController extends Controller
     {
         $profile = $request->user()->workerProfile;
 
+        $holidays = $profile
+            ? $profile->unavailableDates()->orderBy('unavailable_date')->get()
+            : collect();
+
         $bookings = Booking::with(['service', 'customer'])
             ->where('worker_id', $request->user()->id)
             ->latest()
             ->paginate(12);
 
-        return view('worker.dashboard', compact('profile', 'bookings'));
+        return view('worker.dashboard', compact(
+            'profile',
+            'bookings',
+            'holidays'
+        ));
+    }
+
+    public function updateAvailability(Request $request)
+    {
+        $profile = WorkerProfile::where('user_id', $request->user()->id)
+            ->firstOrFail();
+
+        $data = $request->validate([
+            'working_days' => ['required', 'array', 'min:1'],
+            'working_days.*' => [
+                'required',
+                'in:monday,tuesday,wednesday,thursday,friday,saturday,sunday'
+            ],
+            'work_start_time' => ['required', 'date_format:H:i'],
+            'work_end_time' => [
+                'required',
+                'date_format:H:i',
+                'after:work_start_time'
+            ],
+        ]);
+
+        $profile->update($data);
+
+        return redirect()
+            ->route('worker.dashboard')
+            ->with('success', 'Your availability has been updated successfully.');
+    }
+
+    public function addUnavailableDate(Request $request)
+    {
+        $profile = WorkerProfile::where('user_id', $request->user()->id)
+            ->firstOrFail();
+
+        $data = $request->validate([
+            'unavailable_date' => [
+                'required',
+                'date',
+                'after_or_equal:today'
+            ],
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $profile->unavailableDates()->updateOrCreate(
+            ['unavailable_date' => $data['unavailable_date']],
+            ['reason' => $data['reason'] ?? null]
+        );
+
+        return redirect()
+            ->route('worker.dashboard')
+            ->with('success', 'Holiday date added successfully.');
+    }
+
+    public function removeUnavailableDate(Request $request, int $id)
+    {
+        $profile = WorkerProfile::where('user_id', $request->user()->id)
+            ->firstOrFail();
+
+        $holiday = $profile->unavailableDates()->findOrFail($id);
+
+        $holiday->delete();
+
+        return redirect()
+            ->route('worker.dashboard')
+            ->with('success', 'Holiday date removed successfully.');
     }
 
     public function updateStatus(Request $request, Booking $booking)
